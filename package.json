@@ -1,0 +1,47 @@
+{
+  "name": "n8n-nodes-signal-cli",
+  "version": "1.0.0",
+  "description": "n8n community node for signal-cli-rest-api",
+  "keywords": [
+    "n8n-community-node-package",
+    "signal",
+    "signal-cli",
+    "messaging"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Matt Strenk"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/strenkml/n8n-signal-api.git"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc && cp -r nodes/SignalCli/signal.svg dist/nodes/SignalCli/",
+    "dev": "tsc --watch",
+    "lint": "eslint nodes credentials --ext .ts",
+    "prepublishOnly": "pnpm run build"
+  },
+  "packageManager": "pnpm@10.0.0",
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/SignalCliApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/SignalCli/SignalCli.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "n8n-workflow": "^1.0.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": ">=1.0.0"
+  }
+}
