@@ -1,4 +1,4 @@
-# n8n-nodes-signal-cli
+# n8n-nodes-signal-api
 
 An [n8n](https://n8n.io) community node for interacting with [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) — a REST API wrapper around [signal-cli](https://github.com/AsamK/signal-cli).
 
