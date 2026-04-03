@@ -11,7 +11,7 @@ A running instance of [signal-cli-rest-api](https://github.com/bbernhard/signal-
 In your n8n instance, go to **Settings → Community Nodes** and install:
 
 ```
-n8n-nodes-signal-cli
+n8n-nodes-signal-api
 ```
 
 ## Credentials
