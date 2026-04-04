@@ -212,6 +212,12 @@ export class SignalCli implements INodeType {
 						action: 'Send a message',
 					},
 					{
+						name: 'Send and Wait for Response',
+						value: 'sendAndWait',
+						description: 'Send a message and wait for a reply from the recipient',
+						action: 'Send a message and wait for a reply',
+					},
+					{
 						name: 'Send Receipt',
 						value: 'sendReceipt',
 						description: 'Send a read or viewed receipt',
@@ -219,24 +225,6 @@ export class SignalCli implements INodeType {
 					},
 				],
 				default: 'send',
-			},
-
-			// ═══════════════════════════════════════════════════════════════
-			// Shared: sender phone number (used by most operations)
-			// ═══════════════════════════════════════════════════════════════
-			{
-				displayName: 'Sender Phone Number',
-				name: 'number',
-				type: 'string',
-				default: '',
-				placeholder: '+12025551234',
-				description: 'The registered Signal phone number to act as (E.164 format)',
-				required: true,
-				displayOptions: {
-					show: {
-						resource: ['message', 'group', 'contact'],
-					},
-				},
 			},
 
 			// ═══════════════════════════════════════════════════════════════
@@ -331,6 +319,46 @@ export class SignalCli implements INodeType {
 						description: 'Timestamp of a previous message to edit (0 = new message)',
 					},
 				],
+			},
+
+			// ═══════════════════════════════════════════════════════════════
+			// MESSAGE – SEND AND WAIT
+			// ═══════════════════════════════════════════════════════════════
+			{
+				displayName: 'Recipient',
+				name: 'sendWaitRecipient',
+				type: 'string',
+				default: '',
+				placeholder: '+12025551234',
+				required: true,
+				description: 'Phone number to send the message to and wait for a reply from (E.164 format). Note: messages from other senders received during the wait period will be consumed from the queue.',
+				displayOptions: { show: { resource: ['message'], operation: ['sendAndWait'] } },
+			},
+			{
+				displayName: 'Message',
+				name: 'sendWaitMessage',
+				type: 'string',
+				typeOptions: { rows: 4 },
+				default: '',
+				required: true,
+				description: 'The text body of the message to send',
+				displayOptions: { show: { resource: ['message'], operation: ['sendAndWait'] } },
+			},
+			{
+				displayName: 'Max Wait Time (Seconds)',
+				name: 'maxWaitTime',
+				type: 'number',
+				default: 60,
+				description: 'Maximum total time to wait for a reply before timing out',
+				displayOptions: { show: { resource: ['message'], operation: ['sendAndWait'] } },
+			},
+			{
+				displayName: 'Poll Interval (Seconds)',
+				name: 'pollTimeout',
+				type: 'number',
+				default: 5,
+				description: 'How long each receive poll waits for messages before retrying',
+				displayOptions: { show: { resource: ['message'], operation: ['sendAndWait'] } },
 			},
 
 			// ═══════════════════════════════════════════════════════════════
@@ -661,6 +689,7 @@ export class SignalCli implements INodeType {
 
 		const credentials = await this.getCredentials('signalCliApi');
 		const baseUrl = (credentials.baseUrl as string).replace(/\/$/, '');
+		const number = credentials.number as string;
 
 		for (let i = 0; i < items.length; i++) {
 			const resource = this.getNodeParameter('resource', i) as string;
@@ -674,11 +703,11 @@ export class SignalCli implements INodeType {
 				} else if (resource === 'attachment') {
 					responseData = await handleAttachment(this, baseUrl, operation, i);
 				} else if (resource === 'contact') {
-					responseData = await handleContact(this, baseUrl, operation, i);
+					responseData = await handleContact(this, baseUrl, number, operation, i);
 				} else if (resource === 'group') {
-					responseData = await handleGroup(this, baseUrl, operation, i);
+					responseData = await handleGroup(this, baseUrl, number, operation, i);
 				} else if (resource === 'message') {
-					responseData = await handleMessage(this, baseUrl, operation, i);
+					responseData = await handleMessage(this, baseUrl, number, operation, i);
 				} else {
 					throw new NodeOperationError(this.getNode(), `Unknown resource: ${resource}`);
 				}
@@ -775,10 +804,10 @@ async function handleAttachment(
 async function handleContact(
 	context: IExecuteFunctions,
 	baseUrl: string,
+	number: string,
 	operation: string,
 	i: number,
 ): Promise<IDataObject | IDataObject[]> {
-	const number = context.getNodeParameter('number', i) as string;
 
 	if (operation === 'list') {
 		const allRecipients = context.getNodeParameter('all_recipients', i) as boolean;
@@ -812,10 +841,10 @@ async function handleContact(
 async function handleGroup(
 	context: IExecuteFunctions,
 	baseUrl: string,
+	number: string,
 	operation: string,
 	i: number,
 ): Promise<IDataObject | IDataObject[]> {
-	const number = context.getNodeParameter('number', i) as string;
 	const encodedNumber = encodeURIComponent(number);
 
 	if (operation === 'list') {
@@ -906,10 +935,10 @@ async function handleGroup(
 async function handleMessage(
 	context: IExecuteFunctions,
 	baseUrl: string,
+	number: string,
 	operation: string,
 	i: number,
 ): Promise<IDataObject | IDataObject[]> {
-	const number = context.getNodeParameter('number', i) as string;
 	const encodedNumber = encodeURIComponent(number);
 
 	if (operation === 'send') {
@@ -980,6 +1009,50 @@ async function handleMessage(
 			timestamp,
 		});
 		return { success: true };
+	}
+
+	if (operation === 'sendAndWait') {
+		const recipient = context.getNodeParameter('sendWaitRecipient', i) as string;
+		const message = context.getNodeParameter('sendWaitMessage', i) as string;
+		const maxWaitTime = context.getNodeParameter('maxWaitTime', i) as number;
+		const pollTimeout = context.getNodeParameter('pollTimeout', i) as number;
+
+		// Send the message
+		await apiRequest(context, 'POST', `${baseUrl}/v2/send`, {
+			number,
+			recipients: [recipient],
+			message,
+		});
+
+		const startTime = Date.now();
+		const maxWaitMs = maxWaitTime * 1000;
+
+		// Poll for a reply from the recipient
+		while (Date.now() - startTime < maxWaitMs) {
+			const remaining = Math.ceil((maxWaitMs - (Date.now() - startTime)) / 1000);
+			const currentPollTimeout = Math.min(pollTimeout, remaining);
+
+			const result = await apiRequest(
+				context,
+				'GET',
+				`${baseUrl}/v1/receive/${encodedNumber}`,
+				undefined,
+				{ timeout: currentPollTimeout },
+			);
+
+			const msgs = Array.isArray(result) ? result : [result];
+			for (const msg of msgs) {
+				const envelope = (msg as IDataObject).envelope as IDataObject;
+				if (envelope && envelope.source === recipient && envelope.dataMessage) {
+					return msg as IDataObject;
+				}
+			}
+		}
+
+		throw new NodeOperationError(
+			context.getNode(),
+			`Timed out waiting for a response from ${recipient} after ${maxWaitTime} seconds`,
+		);
 	}
 
 	if (operation === 'sendReceipt') {

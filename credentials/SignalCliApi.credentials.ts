@@ -14,5 +14,14 @@ export class SignalCliApi implements ICredentialType {
 			description: 'Base URL of your signal-cli-rest-api instance',
 			required: true,
 		},
+		{
+			displayName: 'Phone Number',
+			name: 'number',
+			type: 'string',
+			default: '',
+			placeholder: '+12025551234',
+			description: 'The registered Signal phone number for this account (E.164 format)',
+			required: true,
+		},
 	];
 }
