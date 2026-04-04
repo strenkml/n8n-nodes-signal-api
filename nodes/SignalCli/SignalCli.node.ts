@@ -331,7 +331,7 @@ export class SignalCli implements INodeType {
 				default: '',
 				placeholder: '+12025551234',
 				required: true,
-				description: 'Phone number to send the message to and wait for a reply from (E.164 format). Note: messages from other senders received during the wait period will be consumed from the queue.',
+				description: 'Phone number (E.164) or group ID (starting with group.) to send to and wait for a reply from. Note: messages from other conversations received during the wait period will be consumed from the queue.',
 				displayOptions: { show: { resource: ['message'], operation: ['sendAndWait'] } },
 			},
 			{
@@ -1043,8 +1043,14 @@ async function handleMessage(
 			const msgs = Array.isArray(result) ? result : [result];
 			for (const msg of msgs) {
 				const envelope = (msg as IDataObject).envelope as IDataObject;
-				if (envelope && envelope.source === recipient && envelope.dataMessage) {
-					return msg as IDataObject;
+				if (!envelope?.dataMessage) continue;
+
+				const isGroup = recipient.startsWith('group.');
+				if (isGroup) {
+					const groupInfo = (envelope.dataMessage as IDataObject).groupInfo as IDataObject;
+					if (groupInfo?.groupId === recipient) return msg as IDataObject;
+				} else {
+					if (envelope.source === recipient) return msg as IDataObject;
 				}
 			}
 		}
