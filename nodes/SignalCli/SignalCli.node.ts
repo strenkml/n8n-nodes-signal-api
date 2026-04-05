@@ -1,3 +1,4 @@
+import WebSocket from 'ws';
 import {
 	IExecuteFunctions,
 	INodeExecutionData,
@@ -128,6 +129,12 @@ export class SignalCli implements INodeType {
 				displayOptions: { show: { resource: ['group'] } },
 				options: [
 					{
+						name: 'Add Admins',
+						value: 'addAdmins',
+						description: 'Promote one or more members to group admin',
+						action: 'Add admins to a group',
+					},
+					{
 						name: 'Add Members',
 						value: 'addMembers',
 						description: 'Add one or more members to a group',
@@ -152,10 +159,28 @@ export class SignalCli implements INodeType {
 						action: 'Get a group',
 					},
 					{
+						name: 'Join',
+						value: 'joinGroup',
+						description: 'Join a Signal group via invite link',
+						action: 'Join a group',
+					},
+					{
+						name: 'Leave',
+						value: 'leaveGroup',
+						description: 'Leave a Signal group',
+						action: 'Leave a group',
+					},
+					{
 						name: 'List',
 						value: 'list',
 						description: 'List all Signal groups',
 						action: 'List all groups',
+					},
+					{
+						name: 'Remove Admins',
+						value: 'removeAdmins',
+						description: 'Demote one or more admins to regular members',
+						action: 'Remove admins from a group',
 					},
 					{
 						name: 'Remove Members',
@@ -352,14 +377,6 @@ export class SignalCli implements INodeType {
 				description: 'Maximum total time to wait for a reply before timing out',
 				displayOptions: { show: { resource: ['message'], operation: ['sendAndWait'] } },
 			},
-			{
-				displayName: 'Poll Interval (Seconds)',
-				name: 'pollTimeout',
-				type: 'number',
-				default: 5,
-				description: 'How long each receive poll waits for messages before retrying',
-				displayOptions: { show: { resource: ['message'], operation: ['sendAndWait'] } },
-			},
 
 			// ═══════════════════════════════════════════════════════════════
 			// MESSAGE – RECEIVE
@@ -483,19 +500,10 @@ export class SignalCli implements INodeType {
 				displayOptions: {
 					show: {
 						resource: ['group'],
-						operation: ['get', 'delete', 'update', 'addMembers', 'removeMembers'],
+						operation: ['get', 'delete', 'update', 'addMembers', 'removeMembers', 'addAdmins', 'removeAdmins', 'joinGroup', 'leaveGroup'],
 					},
 				},
 			},
-			{
-				displayName: 'Expand',
-				name: 'expand',
-				type: 'boolean',
-				default: false,
-				description: 'Whether to return detailed group information',
-				displayOptions: { show: { resource: ['group'], operation: ['list', 'get'] } },
-			},
-
 			// ═══════════════════════════════════════════════════════════════
 			// GROUP – CREATE
 			// ═══════════════════════════════════════════════════════════════
@@ -615,21 +623,9 @@ export class SignalCli implements INodeType {
 				displayOptions: {
 					show: {
 						resource: ['group'],
-						operation: ['addMembers', 'removeMembers'],
+						operation: ['addMembers', 'removeMembers', 'addAdmins', 'removeAdmins'],
 					},
 				},
-			},
-
-			// ═══════════════════════════════════════════════════════════════
-			// CONTACT – LIST
-			// ═══════════════════════════════════════════════════════════════
-			{
-				displayName: 'Include All Recipients',
-				name: 'all_recipients',
-				type: 'boolean',
-				default: false,
-				description: 'Whether to include all known recipients, not only saved contacts',
-				displayOptions: { show: { resource: ['contact'], operation: ['list'] } },
 			},
 
 			// ═══════════════════════════════════════════════════════════════
@@ -810,18 +806,15 @@ async function handleContact(
 ): Promise<IDataObject | IDataObject[]> {
 
 	if (operation === 'list') {
-		const allRecipients = context.getNodeParameter('all_recipients', i) as boolean;
 		return apiRequest(
 			context,
 			'GET',
-			`${baseUrl}/v1/contacts/${encodeURIComponent(number)}`,
-			undefined,
-			{ all_recipients: allRecipients || undefined },
+			`${baseUrl}/v1/accounts/${encodeURIComponent(number)}/contacts`,
 		);
 	}
 
 	if (operation === 'sync') {
-		await apiRequest(context, 'POST', `${baseUrl}/v1/contacts/${encodeURIComponent(number)}/sync`);
+		await apiRequest(context, 'POST', `${baseUrl}/v1/accounts/${encodeURIComponent(number)}/contacts/sync`);
 		return { success: true };
 	}
 
@@ -830,8 +823,8 @@ async function handleContact(
 		const updateFields = context.getNodeParameter('updateFields', i) as IDataObject;
 		const body: IDataObject = { recipient };
 		if (updateFields.name) body.name = updateFields.name;
-		if (updateFields.expiration_time) body.expiration_time = updateFields.expiration_time;
-		await apiRequest(context, 'PUT', `${baseUrl}/v1/contacts/${encodeURIComponent(number)}`, body);
+		if (updateFields.expiration_time) body.expiration_in_seconds = updateFields.expiration_time;
+		await apiRequest(context, 'PUT', `${baseUrl}/v1/accounts/${encodeURIComponent(number)}/contacts`, body);
 		return { success: true };
 	}
 
@@ -848,21 +841,15 @@ async function handleGroup(
 	const encodedNumber = encodeURIComponent(number);
 
 	if (operation === 'list') {
-		const expand = context.getNodeParameter('expand', i) as boolean;
-		return apiRequest(context, 'GET', `${baseUrl}/v1/groups/${encodedNumber}`, undefined, {
-			expand: expand || undefined,
-		});
+		return apiRequest(context, 'GET', `${baseUrl}/v1/accounts/${encodedNumber}/groups`);
 	}
 
 	if (operation === 'get') {
 		const groupId = context.getNodeParameter('groupId', i) as string;
-		const expand = context.getNodeParameter('expand', i) as boolean;
 		return apiRequest(
 			context,
 			'GET',
-			`${baseUrl}/v1/groups/${encodedNumber}/${encodeURIComponent(groupId)}`,
-			undefined,
-			{ expand: expand || undefined },
+			`${baseUrl}/v1/accounts/${encodedNumber}/groups/${encodeURIComponent(groupId)}`,
 		);
 	}
 
@@ -874,7 +861,7 @@ async function handleGroup(
 		if (additional.description) body.description = additional.description;
 		if (additional.expiration_time) body.expiration_time = additional.expiration_time;
 		if (additional.group_link) body.group_link = additional.group_link;
-		return apiRequest(context, 'POST', `${baseUrl}/v1/groups/${encodedNumber}`, body) as Promise<IDataObject>;
+		return apiRequest(context, 'POST', `${baseUrl}/v1/accounts/${encodedNumber}/groups`, body) as Promise<IDataObject>;
 	}
 
 	if (operation === 'update') {
@@ -889,7 +876,7 @@ async function handleGroup(
 		await apiRequest(
 			context,
 			'PUT',
-			`${baseUrl}/v1/groups/${encodedNumber}/${encodeURIComponent(groupId)}`,
+			`${baseUrl}/v1/accounts/${encodedNumber}/groups/${encodeURIComponent(groupId)}`,
 			body,
 		);
 		return { success: true };
@@ -900,7 +887,7 @@ async function handleGroup(
 		await apiRequest(
 			context,
 			'DELETE',
-			`${baseUrl}/v1/groups/${encodedNumber}/${encodeURIComponent(groupId)}`,
+			`${baseUrl}/v1/accounts/${encodedNumber}/groups/${encodeURIComponent(groupId)}`,
 		);
 		return { success: true };
 	}
@@ -911,7 +898,7 @@ async function handleGroup(
 		await apiRequest(
 			context,
 			'POST',
-			`${baseUrl}/v1/groups/${encodedNumber}/${encodeURIComponent(groupId)}/members`,
+			`${baseUrl}/v1/accounts/${encodedNumber}/groups/${encodeURIComponent(groupId)}/members`,
 			{ members },
 		);
 		return { success: true };
@@ -923,8 +910,52 @@ async function handleGroup(
 		await apiRequest(
 			context,
 			'DELETE',
-			`${baseUrl}/v1/groups/${encodedNumber}/${encodeURIComponent(groupId)}/members`,
+			`${baseUrl}/v1/accounts/${encodedNumber}/groups/${encodeURIComponent(groupId)}/members`,
 			{ members },
+		);
+		return { success: true };
+	}
+
+	if (operation === 'addAdmins') {
+		const groupId = context.getNodeParameter('groupId', i) as string;
+		const members = context.getNodeParameter('members', i) as string[];
+		await apiRequest(
+			context,
+			'POST',
+			`${baseUrl}/v1/accounts/${encodedNumber}/groups/${encodeURIComponent(groupId)}/admins`,
+			{ members },
+		);
+		return { success: true };
+	}
+
+	if (operation === 'removeAdmins') {
+		const groupId = context.getNodeParameter('groupId', i) as string;
+		const members = context.getNodeParameter('members', i) as string[];
+		await apiRequest(
+			context,
+			'DELETE',
+			`${baseUrl}/v1/accounts/${encodedNumber}/groups/${encodeURIComponent(groupId)}/admins`,
+			{ members },
+		);
+		return { success: true };
+	}
+
+	if (operation === 'joinGroup') {
+		const groupId = context.getNodeParameter('groupId', i) as string;
+		await apiRequest(
+			context,
+			'POST',
+			`${baseUrl}/v1/accounts/${encodedNumber}/groups/${encodeURIComponent(groupId)}/join`,
+		);
+		return { success: true };
+	}
+
+	if (operation === 'leaveGroup') {
+		const groupId = context.getNodeParameter('groupId', i) as string;
+		await apiRequest(
+			context,
+			'POST',
+			`${baseUrl}/v1/accounts/${encodedNumber}/groups/${encodeURIComponent(groupId)}/quit`,
 		);
 		return { success: true };
 	}
@@ -946,7 +977,7 @@ async function handleMessage(
 		const message = context.getNodeParameter('message', i) as string;
 		const additional = context.getNodeParameter('additionalFields', i) as IDataObject;
 
-		const body: IDataObject = { number, recipients, message };
+		const body: IDataObject = { recipients, message };
 		if (additional.base64_attachments && (additional.base64_attachments as string[]).length > 0) {
 			body.base64_attachments = additional.base64_attachments;
 		}
@@ -960,7 +991,7 @@ async function handleMessage(
 		if (additional.view_once) body.view_once = additional.view_once;
 		if (additional.edit_timestamp) body.edit_timestamp = additional.edit_timestamp;
 
-		return apiRequest(context, 'POST', `${baseUrl}/v2/send`, body) as Promise<IDataObject>;
+		return apiRequest(context, 'POST', `${baseUrl}/v1/accounts/${encodedNumber}/messages`, body) as Promise<IDataObject>;
 	}
 
 	if (operation === 'receive') {
@@ -968,7 +999,7 @@ async function handleMessage(
 		const result = await apiRequest(
 			context,
 			'GET',
-			`${baseUrl}/v1/receive/${encodedNumber}`,
+			`${baseUrl}/v1/accounts/${encodedNumber}/messages`,
 			undefined,
 			{ timeout },
 		);
@@ -979,7 +1010,7 @@ async function handleMessage(
 	if (operation === 'delete') {
 		const recipients = context.getNodeParameter('recipients', i) as string[];
 		const timestamp = context.getNodeParameter('timestamp', i) as number;
-		await apiRequest(context, 'DELETE', `${baseUrl}/v1/remote-delete/${encodedNumber}`, {
+		await apiRequest(context, 'POST', `${baseUrl}/v1/accounts/${encodedNumber}/messages/remote-delete`, {
 			recipients,
 			timestamp,
 		});
@@ -991,7 +1022,7 @@ async function handleMessage(
 		const targetAuthor = context.getNodeParameter('target_author', i) as string;
 		const timestamp = context.getNodeParameter('timestamp', i) as number;
 		const reaction = context.getNodeParameter('reaction', i) as string;
-		return apiRequest(context, 'POST', `${baseUrl}/v1/reactions/${encodedNumber}`, {
+		return apiRequest(context, 'POST', `${baseUrl}/v1/accounts/${encodedNumber}/reactions`, {
 			recipient,
 			target_author: targetAuthor,
 			timestamp,
@@ -1003,7 +1034,7 @@ async function handleMessage(
 		const recipient = context.getNodeParameter('recipient', i) as string;
 		const targetAuthor = context.getNodeParameter('target_author', i) as string;
 		const timestamp = context.getNodeParameter('timestamp', i) as number;
-		await apiRequest(context, 'DELETE', `${baseUrl}/v1/reactions/${encodedNumber}`, {
+		await apiRequest(context, 'DELETE', `${baseUrl}/v1/accounts/${encodedNumber}/reactions`, {
 			recipient,
 			target_author: targetAuthor,
 			timestamp,
@@ -1015,57 +1046,67 @@ async function handleMessage(
 		const recipient = context.getNodeParameter('sendWaitRecipient', i) as string;
 		const message = context.getNodeParameter('sendWaitMessage', i) as string;
 		const maxWaitTime = context.getNodeParameter('maxWaitTime', i) as number;
-		const pollTimeout = context.getNodeParameter('pollTimeout', i) as number;
+		const maxWaitMs = maxWaitTime * 1000;
 
 		// Send the message
-		await apiRequest(context, 'POST', `${baseUrl}/v2/send`, {
-			number,
+		await apiRequest(context, 'POST', `${baseUrl}/v1/accounts/${encodedNumber}/messages`, {
 			recipients: [recipient],
 			message,
 		});
 
-		const startTime = Date.now();
-		const maxWaitMs = maxWaitTime * 1000;
+		// Connect to the stream and wait for a matching reply
+		const wsBaseUrl = baseUrl.replace(/^http(s?):\/\//, (_, s) => `ws${s}://`);
+		const streamUrl = `${wsBaseUrl}/v1/accounts/${encodedNumber}/messages/stream`;
 
-		// Poll for a reply from the recipient
-		while (Date.now() - startTime < maxWaitMs) {
-			const remaining = Math.ceil((maxWaitMs - (Date.now() - startTime)) / 1000);
-			const currentPollTimeout = Math.min(pollTimeout, remaining);
+		return new Promise<IDataObject>((resolve, reject) => {
+			const ws = new WebSocket(streamUrl);
 
-			const result = await apiRequest(
-				context,
-				'GET',
-				`${baseUrl}/v1/receive/${encodedNumber}`,
-				undefined,
-				{ timeout: currentPollTimeout },
-			);
+			const timer = setTimeout(() => {
+				ws.close();
+				reject(new NodeOperationError(
+					context.getNode(),
+					`Timed out waiting for a response from ${recipient} after ${maxWaitTime} seconds`,
+				));
+			}, maxWaitMs);
 
-			const msgs = Array.isArray(result) ? result : [result];
-			for (const msg of msgs) {
-				const envelope = (msg as IDataObject).envelope as IDataObject;
-				if (!envelope?.dataMessage) continue;
+			ws.on('message', (data) => {
+				try {
+					const msg = JSON.parse(data.toString()) as IDataObject;
+					const envelope = msg.envelope as IDataObject;
+					if (!envelope?.dataMessage) return;
 
-				const isGroup = recipient.startsWith('group.');
-				if (isGroup) {
-					const groupInfo = (envelope.dataMessage as IDataObject).groupInfo as IDataObject;
-					if (groupInfo?.groupId === recipient) return msg as IDataObject;
-				} else {
-					if (envelope.source === recipient) return msg as IDataObject;
+					const isGroup = recipient.startsWith('group.');
+					if (isGroup) {
+						const groupInfo = (envelope.dataMessage as IDataObject).groupInfo as IDataObject;
+						if (groupInfo?.groupId === recipient) {
+							clearTimeout(timer);
+							ws.close();
+							resolve(msg);
+						}
+					} else {
+						if (envelope.source === recipient) {
+							clearTimeout(timer);
+							ws.close();
+							resolve(msg);
+						}
+					}
+				} catch (_) {
+					// ignore non-JSON frames
 				}
-			}
-		}
+			});
 
-		throw new NodeOperationError(
-			context.getNode(),
-			`Timed out waiting for a response from ${recipient} after ${maxWaitTime} seconds`,
-		);
+			ws.on('error', (err) => {
+				clearTimeout(timer);
+				reject(new NodeOperationError(context.getNode(), `WebSocket error: ${err.message}`));
+			});
+		});
 	}
 
 	if (operation === 'sendReceipt') {
 		const recipient = context.getNodeParameter('recipient', i) as string;
 		const receiptType = context.getNodeParameter('receipt_type', i) as string;
 		const timestamp = context.getNodeParameter('timestamp', i) as number;
-		await apiRequest(context, 'POST', `${baseUrl}/v1/receipts/${encodedNumber}`, {
+		await apiRequest(context, 'POST', `${baseUrl}/v1/accounts/${encodedNumber}/receipts`, {
 			recipient,
 			receipt_type: receiptType,
 			timestamp,

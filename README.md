@@ -1,10 +1,10 @@
 # n8n-nodes-signal-api
 
-An [n8n](https://n8n.io) community node for interacting with [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) — a REST API wrapper around [signal-cli](https://github.com/AsamK/signal-cli).
+An [n8n](https://n8n.io) community node for interacting with [signal-cli-rest-api](https://github.com/strenkml/signal-cli-rest-api) — a REST API wrapper around [signal-cli](https://github.com/AsamK/signal-cli).
 
 ## Prerequisites
 
-A running instance of [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) with at least one registered or linked Signal account.
+A running instance of [signal-cli-rest-api](https://github.com/strenkml/signal-cli-rest-api) with at least one registered or linked Signal account.
 
 ## Installation
 
@@ -16,15 +16,18 @@ n8n-nodes-signal-api
 
 ## Credentials
 
-Add a **Signal CLI REST API** credential with the base URL of your signal-cli-rest-api instance (e.g. `http://localhost:8080`).
+Add a **Signal CLI REST API** credential with:
+- **Base URL** — URL of your signal-cli-rest-api instance (e.g. `http://localhost:8080`)
+- **Phone Number** — the registered Signal account number in E.164 format (e.g. `+12025551234`)
 
 ## Supported Resources & Operations
 
 ### Message
 | Operation | Description |
 |---|---|
-| Send | Send a message to one or more recipients or groups (v2 API) |
+| Send | Send a message to one or more recipients or groups |
 | Receive | Poll for pending incoming messages |
+| Send and Wait for Response | Send a message and wait for a reply via WebSocket stream |
 | Delete (Remote) | Delete a sent message for all recipients |
 | React | Send a reaction emoji to a message |
 | Remove Reaction | Remove a previously sent reaction |
@@ -40,6 +43,10 @@ Add a **Signal CLI REST API** credential with the base URL of your signal-cli-re
 | Delete | Delete a Signal group |
 | Add Members | Add one or more members to a group |
 | Remove Members | Remove one or more members from a group |
+| Add Admins | Promote one or more members to group admin |
+| Remove Admins | Demote one or more admins to regular members |
+| Join | Join a group via invite link |
+| Leave | Leave a Signal group |
 
 ### Contact
 | Operation | Description |
@@ -67,6 +74,7 @@ Add a **Signal CLI REST API** credential with the base URL of your signal-cli-re
   - `<BASE64>`
   - `data:<MIME-TYPE>;base64,<BASE64>`
   - `data:<MIME-TYPE>;filename=<FILENAME>;base64,<BASE64>`
+- **Send and Wait** connects to the server's WebSocket stream and resolves the moment a matching reply arrives, so `Max Wait Time` is the only timeout you need to configure.
 
 ## License
 
